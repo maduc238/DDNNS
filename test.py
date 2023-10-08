@@ -1,4 +1,14 @@
-import networkx as nx
+from src.Utils import *
 
-G = nx.complete_graph(5)
-nx.draw(G)
+
+def myFunc(e):
+    return e['year']
+
+
+if __name__ == "__main__":
+    data = [1,2,3,4,5]
+    sum = 0
+    for a in range(0,2+1):
+        sum += data[a]
+
+    print(generate_normal_random())

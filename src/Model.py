@@ -10,7 +10,7 @@ def insert_layer(graph: nx.Graph, lists, group):
         if lists[rank] not in graph.nodes[a]['prev_dev']:
             graph.nodes[a]['prev_dev'].append(lists[rank])
 
-        if lists[rank+1] not in graph.nodes[a]['next_dev']:
+        if lists[rank + 1] not in graph.nodes[a]['next_dev']:
             graph.nodes[a]['next_dev'].append(lists[rank + 2])
 
 
@@ -24,6 +24,7 @@ class Model:
         self.neural_mem.append(first_layer_mem)
         self.neural_exec_time.append(first_layer_exec_time)
 
+        self.devices_graph = None
         self.output_device = None
         self.input_devices = None
 
@@ -49,28 +50,42 @@ class Model:
         :param cut_group: List of cut point index
         :return:
         """
+        self.devices_graph = graph
         if (self.input_devices is None) or (self.output_device is None):
             raise False
-        for a in graph.nodes():
+
+        # initial devices data
+        node = self.devices_graph.nodes
+        for a in self.devices_graph.nodes():
             if a not in self.input_devices and a not in self.output_device:
-                graph.nodes[a]['start_layer'] = None
-                graph.nodes[a]['end_layer'] = None
-                graph.nodes[a]['next_dev'] = []
-                graph.nodes[a]['prev_dev'] = []
+                node[a]['start_layer'] = None
+                node[a]['end_layer'] = None
+                node[a]['next_dev'] = []
+                node[a]['prev_dev'] = []
+                node[a]['handler'] = False
+                node[a]['mem_usage'] = node[a]['idle_mem']
 
         for a in self.input_devices:
-            graph.nodes[a]['start_layer'] = 0
-            graph.nodes[a]['end_layer'] = cut_group[0] - 1
-            graph.nodes[a]['next_dev'] = []
-            for b in graph.neighbors(a):
-                graph.nodes[a]['next_dev'].append(b)
+            node[a]['start_layer'] = 0
+            node[a]['end_layer'] = cut_group[0] - 1
+            node[a]['next_dev'] = []
+            node[a]['handler'] = False
+            node[a]['mem_usage'] = node[a]['idle_mem']
+            for b in self.devices_graph.neighbors(a):
+                node[a]['next_dev'].append(b)
 
         for a in self.output_device:
-            graph.nodes[a]['start_layer'] = cut_group[-1]
-            graph.nodes[a]['end_layer'] = self.num_layer - 1
-            graph.nodes[a]['prev_dev'] = []
-            for b in graph.neighbors(a):
-                graph.nodes[a]['prev_dev'].append(b)
+            node[a]['start_layer'] = cut_group[-1]
+            node[a]['end_layer'] = self.num_layer - 1
+            node[a]['prev_dev'] = []
+            node[a]['handler'] = False
+            node[a]['mem_usage'] = node[a]['idle_mem']
+            for b in self.devices_graph.neighbors(a):
+                node[a]['prev_dev'].append(b)
+
+        # set link property
+        for e1, e2 in self.devices_graph.edges:
+            self.devices_graph[e1][e2]['handler'] = False
 
         if len(cut_group) < 2:
             return
@@ -78,6 +93,24 @@ class Model:
         # other devices
         for i in self.input_devices:
             for o in self.output_device:
-                for path in nx.all_simple_paths(graph, source=i, target=o):
+                for path in nx.all_simple_paths(self.devices_graph, source=i, target=o):
                     if len(path) == len(cut_group) + 1:
-                        insert_layer(graph, path, cut_group)
+                        insert_layer(self.devices_graph, path, cut_group)
+
+    def get_exec_time(self, name: str):
+        from_layer = self.devices_graph.nodes[name]['start_layer']
+        to_layer = self.devices_graph.nodes[name]['end_layer']
+        exec_time = 0.0
+        for i in range(from_layer, to_layer + 1):
+            exec_time += self.neural_exec_time[i]
+
+        return exec_time
+
+    def get_trans_time(self, _from: str, _to: str, flow: str):
+        sample_size = 0.0
+        trans_rate = self.devices_graph[_from][_to]['trans_rate']
+        if flow == 'F':
+            sample_size = self.neural_inter_layer_size[self.devices_graph.nodes[_from]['end_layer']]
+        elif flow == 'B':
+            sample_size = self.neural_inter_layer_size[self.devices_graph.nodes[_to]['end_layer']]
+        return trans_rate * sample_size

@@ -11,3 +11,10 @@ def generate_normal_random():
 
 def timer(e):
     return e['time']
+
+
+def generate_micro_batch(num_a: int, num_b: int):
+    if num_a % num_b == 0:
+        return [num_a // num_b] * num_b
+    else:
+        return [num_a // num_b] * num_b + [num_a % num_b]

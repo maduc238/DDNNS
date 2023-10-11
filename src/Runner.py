@@ -11,6 +11,7 @@ class Runner:
         self.data = data
         self.opt = opt
         self.time = 0.0
+        self.trained_data = 0
 
         # format event queue: time, action, data_size,
         self.event_queue = []
@@ -33,43 +34,56 @@ class Runner:
             self.time = time
         log.info(data)
 
-    def insert_event(self, data):
+    def insert_event(self, data, time):
+        data['time'] = time
         self.event_queue.append(data)
         self.event_queue.sort(key=timer)
-        self.time = data['time']
+        self.time = time
         log.info(data)
 
     def start(self):
-        log.warn("Start run simulation")
-        trained_data = 0
-        while trained_data <= self.data.num_data:
+        log.warn(f"Start run simulation at 'time': {self.time}")
+        while self.trained_data <= self.data.num_data:
             # start initial with input data devices
-            for a in self.model.input_devices:
-                if not self.model.devices_graph.nodes[a]["handler"]:
-                    log.info(f"Insert input data on device {a}")
-                    data_size = self.opt.batch_size / len(self.model.input_devices)
-                    self.insert_dev_event(self.time, 'start', a, int(data_size), "F")
-                    self.model.devices_graph.nodes[a]["handler"] = True
+            for micro_batch_data in generate_micro_batch(self.opt.batch_size, self.opt.num_micro_batch):
+                for (a, data_size_a) in zip(self.model.input_devices,
+                                            generate_micro_batch(micro_batch_data, len(self.model.input_devices))):
+                    if self.model.devices_graph.nodes[a]["handler"]:
+                        event = {'time': self.time, 'action': 'start', 'type': 'D',
+                                 'name': a, 'data_size': data_size_a, 'flow': 'F'}
+                        self.wait_queue.append(event)
+                    else:
+                        log.info(f"Insert input data size {data_size_a} on device {a} at 'time': {self.time}")
+                        self.insert_dev_event(self.time, 'start', a, int(data_size_a), 'F')
+                        self.model.devices_graph.nodes[a]["handler"] = True
 
             # handler event (event action means handler after this event)
             while len(self.event_queue) != 0:
                 self.handler_event()
 
             # and now start backpropagation
-            for a in self.model.output_device:
-                if not self.model.devices_graph.nodes[a]["handler"]:
-                    log.info(f"Start backpropagation on device {a}")
-                    data_size = self.opt.batch_size / len(self.model.input_devices)
-                    self.model.devices_graph.nodes[a]["handler"] = True
-                    self.insert_dev_event(self.time, 'start', a, int(data_size), "B")
+            for micro_batch_data in generate_micro_batch(self.opt.batch_size, self.opt.num_micro_batch):
+                for (a, data_size_a) in zip(self.model.output_device,
+                                            generate_micro_batch(micro_batch_data, len(self.model.output_device))):
+                    if self.model.devices_graph.nodes[a]["handler"]:
+                        event = {'time': self.time, 'action': 'start', 'type': 'D',
+                                 'name': a, 'data_size': data_size_a, 'flow': 'B'}
+                        self.wait_queue.append(event)
+                    else:
+                        log.info(f"Start backpropagation data size {data_size_a} on device {a} at 'time': {self.time}")
+                        self.insert_dev_event(self.time, 'start', a, int(data_size_a), 'B')
+                        self.model.devices_graph.nodes[a]["handler"] = True
 
             while len(self.event_queue) != 0:
                 self.handler_event()
 
-            break
-            # trained_data += self.opt.batch_size
+            break       # for debug
 
-        log.info(f"Training time: {self.time}")
+        # check available queue -> get error
+        if len(self.event_queue) != 0 or len(self.wait_queue) != 0:
+            log.error(f"Still have available queue process")
+
+        log.info(f"Training time: {self.time} ms")
 
     def handler_event(self):
         event = self.event_queue.pop(0)
@@ -85,23 +99,28 @@ class Runner:
                 exec_time = self.model.get_exec_time(dev)
                 # TODO: check resource
                 node_dev['handler'] = False
-                self.insert_dev_event(time + training_rate * exec_time * (1 + generate_normal_random()), 'end',
-                                      dev, int(data_size), event['flow'])
+                time += training_rate * exec_time * (1 + generate_normal_random())
+                self.insert_dev_event(time, 'end', dev, int(data_size), event['flow'])
 
                 # handler wait process
                 for wait in self.wait_queue:
                     if wait['type'] == 'D':
                         if wait['name'] == dev:
-                            self.insert_event(wait)
+                            self.insert_event(wait, time)
+                            self.wait_queue.remove(wait)
 
             # end training event -> transfer
             elif event['action'] == 'end':
                 # TODO: check resource
                 next_dev = None
-                if event['flow'] == "F" and dev not in self.model.output_device:
+                if event['flow'] == 'F' and dev not in self.model.output_device:
                     next_dev = node_dev['next_dev']
-                elif event['flow'] == "B" and dev not in self.model.input_devices:
-                    next_dev = node_dev['prev_dev']
+                elif event['flow'] == 'B':
+                    if dev not in self.model.input_devices:
+                        next_dev = node_dev['prev_dev']
+                    else:
+                        # done training
+                        self.trained_data += data_size
                 if next_dev is not None:
                     for n_dev in next_dev:
                         # check busy link
@@ -123,20 +142,26 @@ class Runner:
             # link start receive data
             if event['action'] == 'start':
                 data_rate_time = self.model.get_trans_time(from_dev, to_dev, event['flow'])
-                delta = (data_rate_time * (1 + generate_normal_random()) * 1_000 * data_size) / \
+                time += (data_rate_time * (1 + generate_normal_random()) * 1_000 * data_size) / \
                         (self.data.size * self.opt.batch_size)
                 # assume that root data gain 1_000 ms
-                self.model.devices_graph[from_dev][to_dev]["handler"] = False   # unlock process
-                self.insert_link_event(time + delta, 'end', from_dev, to_dev, int(data_size), event['flow'])
+                self.model.devices_graph[from_dev][to_dev]["handler"] = False  # unlock process
+                self.insert_link_event(time, 'end', from_dev, to_dev, int(data_size), event['flow'])
 
                 # handler wait process
                 for wait in self.wait_queue:
                     if wait['type'] == 'L':
                         if (wait['from'] == from_dev and wait['to'] == to_dev) or \
                                 (wait['from'] == to_dev and wait['to'] == from_dev):
-                            self.insert_event(wait)
+                            self.insert_event(wait, time)
+                            self.wait_queue.remove(wait)
 
             # link done transmission
             elif event['action'] == 'end':
-                self.model.devices_graph.nodes[to_dev]["handler"] = True
-                self.insert_dev_event(time, 'start', to_dev, int(data_size), event['flow'])
+                # check busy dev
+                if self.model.devices_graph.nodes[to_dev]["handler"]:
+                    self.wait_queue.append(event)
+                # if not, continue flow
+                else:
+                    self.model.devices_graph.nodes[to_dev]["handler"] = True
+                    self.insert_dev_event(time, 'start', to_dev, int(data_size), event['flow'])

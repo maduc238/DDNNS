@@ -1,4 +1,4 @@
 class Optim:
-    def __init__(self, batch_size: int):
+    def __init__(self, batch_size: int, num_micro_batch: int = None):
         self.batch_size = batch_size
-        self.micro_batch_size = None
+        self.num_micro_batch = num_micro_batch

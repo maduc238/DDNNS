@@ -34,20 +34,21 @@ if __name__ == '__main__':
 
     model.set_input_device(["A"])
     model.set_output_device(["C"])
-    model.set_layer_group(g, [3, 5])
+    model.set_layer_group(g, [3, 5])        # cut at layers
     log.info(list(g.nodes(data=True)))
     log.info(list(g.edges(data=True)))
 
-    # TODO: create data
     data = Data(128 * 128 * 3, 50_000)
 
-    # TODO: create micro-batch
-    opt = Optim(batch_size=128)
+    opt = Optim(batch_size=128, num_micro_batch=4)
 
-    # TODO: run training with pipeline
     run = Runner(model, data, opt)
-    # TODO: run forward and backward
     run.start()
+
+    # TODO: add flow id
+    # TODO: add check resource
+    # TODO: add tree connection
+    # TODO: add energy consumption
 
     stop_time = time.time()
     log.info(f"Simulation running for {stop_time - start_time} seconds")

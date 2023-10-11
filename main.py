@@ -41,10 +41,10 @@ if __name__ == '__main__':
     # TODO: create data
     data = Data(128 * 128 * 3, 50_000)
 
-    # TODO: create optimal
+    # TODO: create micro-batch
     opt = Optim(batch_size=128)
 
-    # TODO: run training
+    # TODO: run training with pipeline
     run = Runner(model, data, opt)
     # TODO: run forward and backward
     run.start()

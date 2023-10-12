@@ -1,5 +1,7 @@
 import networkx as nx
 
+from src.Logging import *
+
 
 def insert_layer(graph: nx.Graph, lists, group):
     for rank, a in enumerate(lists[1:-1]):
@@ -71,6 +73,7 @@ class Model:
             node[a]['next_dev'] = []
             node[a]['handler'] = False
             node[a]['mem_usage'] = node[a]['idle_mem']
+
             for b in self.devices_graph.neighbors(a):
                 node[a]['next_dev'].append(b)
 
@@ -97,6 +100,16 @@ class Model:
                     if len(path) == len(cut_group) + 1:
                         insert_layer(self.devices_graph, path, cut_group)
 
+        # TODO: check all available memory
+        mem_operation = True
+        for dev in self.devices_graph.nodes():
+            mem_req = self.get_mem_requirement(dev)
+            if node[dev]['mem_usage'] + mem_req > node[dev]['mem_size']:
+                log.warn(f"Device {dev} can not operate with memory requirement {node[dev]['mem_usage'] + mem_req} - "
+                         f"memory size {node[dev]['mem_size']}")
+                mem_operation = False
+
+
     def get_exec_time(self, name: str):
         from_layer = self.devices_graph.nodes[name]['start_layer']
         to_layer = self.devices_graph.nodes[name]['end_layer']
@@ -114,3 +127,13 @@ class Model:
         elif flow == 'B':
             sample_size = self.neural_inter_layer_size[self.devices_graph.nodes[_to]['end_layer']]
         return trans_rate * sample_size
+
+    def get_mem_requirement(self, name: str):
+        from_layer = self.devices_graph.nodes[name]['start_layer']
+        to_layer = self.devices_graph.nodes[name]['end_layer']
+        mem_rate = self.devices_graph.nodes[name]['mem_rate']
+        mem_req = 0.0
+        for i in range(from_layer, to_layer + 1):
+            mem_req += self.neural_mem[i]
+
+        return mem_req * mem_rate

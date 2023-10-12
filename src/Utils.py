@@ -1,4 +1,6 @@
 from numpy import random
+import os
+import hashlib
 
 
 def generate_normal_random():
@@ -7,6 +9,10 @@ def generate_normal_random():
         return result
     else:
         return 0.0
+
+
+def generate_id():
+    return hashlib.sha1(os.urandom(16)).hexdigest()[:10]
 
 
 def timer(e):

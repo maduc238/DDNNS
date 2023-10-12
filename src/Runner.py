@@ -17,16 +17,28 @@ class Runner:
         self.event_queue = []
         self.wait_queue = []
 
-    def insert_dev_event(self, time: float, action: str, name: str, data_size: int, flow: str):
-        data = {'time': time, 'action': action, 'type': 'D', 'name': name, 'data_size': data_size, 'flow': flow}
+    def insert_dev_event(self, _id: str, time: float, action: str, name: str, data_size: int, flow: str):
+        data = {'id': _id,
+                'time': time,
+                'action': action,
+                'type': 'D',
+                'name': name,
+                'data_size': data_size,
+                'flow': flow}
         self.event_queue.append(data)
         self.event_queue.sort(key=timer)
         if time > self.time:
             self.time = time
         log.info(data)
 
-    def insert_link_event(self, time: float, action: str, _from: str, _to: str, data_size: int, flow: str):
-        data = {'time': time, 'action': action, 'type': 'L', 'from': _from, 'to': _to, 'data_size': data_size,
+    def insert_link_event(self, _id: str, time: float, action: str, _from: str, _to: str, data_size: int, flow: str):
+        data = {'id': _id,
+                'time': time,
+                'action': action,
+                'type': 'L',
+                'from': _from,
+                'to': _to,
+                'data_size': data_size,
                 'flow': flow}
         self.event_queue.append(data)
         self.event_queue.sort(key=timer)
@@ -49,12 +61,12 @@ class Runner:
                 for (a, data_size_a) in zip(self.model.input_devices,
                                             generate_micro_batch(micro_batch_data, len(self.model.input_devices))):
                     if self.model.devices_graph.nodes[a]["handler"]:
-                        event = {'time': self.time, 'action': 'start', 'type': 'D',
+                        event = {'id': generate_id(), 'time': self.time, 'action': 'S', 'type': 'D',
                                  'name': a, 'data_size': data_size_a, 'flow': 'F'}
                         self.wait_queue.append(event)
                     else:
                         log.info(f"Insert input data size {data_size_a} on device {a} at 'time': {self.time}")
-                        self.insert_dev_event(self.time, 'start', a, int(data_size_a), 'F')
+                        self.insert_dev_event(generate_id(), self.time, 'S', a, int(data_size_a), 'F')
                         self.model.devices_graph.nodes[a]["handler"] = True
 
             # handler event (event action means handler after this event)
@@ -66,12 +78,12 @@ class Runner:
                 for (a, data_size_a) in zip(self.model.output_device,
                                             generate_micro_batch(micro_batch_data, len(self.model.output_device))):
                     if self.model.devices_graph.nodes[a]["handler"]:
-                        event = {'time': self.time, 'action': 'start', 'type': 'D',
+                        event = {'id': generate_id(), 'time': self.time, 'action': 'S', 'type': 'D',
                                  'name': a, 'data_size': data_size_a, 'flow': 'B'}
                         self.wait_queue.append(event)
                     else:
                         log.info(f"Start backpropagation data size {data_size_a} on device {a} at 'time': {self.time}")
-                        self.insert_dev_event(self.time, 'start', a, int(data_size_a), 'B')
+                        self.insert_dev_event(generate_id(), self.time, 'S', a, int(data_size_a), 'B')
                         self.model.devices_graph.nodes[a]["handler"] = True
 
             while len(self.event_queue) != 0:
@@ -94,13 +106,13 @@ class Runner:
             node_dev = self.model.devices_graph.nodes[dev]
 
             # start training event
-            if event['action'] == 'start':
+            if event['action'] == 'S':
                 training_rate = node_dev['training_rate']
                 exec_time = self.model.get_exec_time(dev)
                 # TODO: check resource
                 node_dev['handler'] = False
                 time += training_rate * exec_time * (1 + generate_normal_random())
-                self.insert_dev_event(time, 'end', dev, int(data_size), event['flow'])
+                self.insert_dev_event(event['id'], time, 'E', dev, int(data_size), event['flow'])
 
                 # handler wait process
                 for wait in self.wait_queue:
@@ -110,7 +122,7 @@ class Runner:
                             self.wait_queue.remove(wait)
 
             # end training event -> transfer
-            elif event['action'] == 'end':
+            elif event['action'] == 'E':
                 # TODO: check resource
                 next_dev = None
                 if event['flow'] == 'F' and dev not in self.model.output_device:
@@ -129,8 +141,8 @@ class Runner:
                         # if not, continue flow
                         else:
                             self.model.devices_graph[dev][n_dev]["handler"] = True
-                            self.insert_link_event(time, 'start', dev, n_dev, int(data_size / len(next_dev)),
-                                                   event['flow'])
+                            self.insert_link_event(event['id'], time, 'S', dev, n_dev,
+                                                   int(data_size / len(next_dev)), event['flow'])
 
         # start transfer
         elif event['type'] == 'L':  # link event
@@ -140,13 +152,13 @@ class Runner:
             data_size = event['data_size']
 
             # link start receive data
-            if event['action'] == 'start':
+            if event['action'] == 'S':
                 data_rate_time = self.model.get_trans_time(from_dev, to_dev, event['flow'])
                 time += (data_rate_time * (1 + generate_normal_random()) * 1_000 * data_size) / \
                         (self.data.size * self.opt.batch_size)
                 # assume that root data gain 1_000 ms
                 self.model.devices_graph[from_dev][to_dev]["handler"] = False  # unlock process
-                self.insert_link_event(time, 'end', from_dev, to_dev, int(data_size), event['flow'])
+                self.insert_link_event(event['id'], time, 'E', from_dev, to_dev, int(data_size), event['flow'])
 
                 # handler wait process
                 for wait in self.wait_queue:
@@ -157,11 +169,11 @@ class Runner:
                             self.wait_queue.remove(wait)
 
             # link done transmission
-            elif event['action'] == 'end':
+            elif event['action'] == 'E':
                 # check busy dev
                 if self.model.devices_graph.nodes[to_dev]["handler"]:
                     self.wait_queue.append(event)
                 # if not, continue flow
                 else:
                     self.model.devices_graph.nodes[to_dev]["handler"] = True
-                    self.insert_dev_event(time, 'start', to_dev, int(data_size), event['flow'])
+                    self.insert_dev_event(event['id'], time, 'S', to_dev, int(data_size), event['flow'])

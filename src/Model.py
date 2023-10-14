@@ -12,7 +12,7 @@ def insert_layer(graph: nx.Graph, lists, group):
         if lists[rank] not in graph.nodes[a]['prev_dev']:
             graph.nodes[a]['prev_dev'].append(lists[rank])
 
-        if lists[rank + 1] not in graph.nodes[a]['next_dev']:
+        if lists[rank + 2] not in graph.nodes[a]['next_dev']:
             graph.nodes[a]['next_dev'].append(lists[rank + 2])
 
 
@@ -54,7 +54,8 @@ class Model:
         """
         self.devices_graph = graph
         if (self.input_devices is None) or (self.output_device is None):
-            raise False
+            log.error("Devices data is None")
+            exit()
 
         # initial devices data
         node = self.devices_graph.nodes
@@ -75,7 +76,8 @@ class Model:
             node[a]['mem_usage'] = node[a]['idle_mem']
 
             for b in self.devices_graph.neighbors(a):
-                node[a]['next_dev'].append(b)
+                if b not in node[a]['next_dev']:
+                    node[a]['next_dev'].append(b)
 
         for a in self.output_device:
             node[a]['start_layer'] = cut_group[-1]
@@ -84,7 +86,8 @@ class Model:
             node[a]['handler'] = False
             node[a]['mem_usage'] = node[a]['idle_mem']
             for b in self.devices_graph.neighbors(a):
-                node[a]['prev_dev'].append(b)
+                if b not in node[a]['prev_dev']:
+                    node[a]['prev_dev'].append(b)
 
         # set link property
         for e1, e2 in self.devices_graph.edges:
@@ -100,15 +103,18 @@ class Model:
                     if len(path) == len(cut_group) + 1:
                         insert_layer(self.devices_graph, path, cut_group)
 
-        # TODO: check all available memory
+        # check all available memory
         mem_operation = True
         for dev in self.devices_graph.nodes():
             mem_req = self.get_mem_requirement(dev)
             if node[dev]['mem_usage'] + mem_req > node[dev]['mem_size']:
-                log.warn(f"Device {dev} can not operate with memory requirement {node[dev]['mem_usage'] + mem_req} - "
-                         f"memory size {node[dev]['mem_size']}")
+                log.error(f"Device {dev} can not operate with memory requirement {node[dev]['mem_usage'] + mem_req} - "
+                          f"memory size {node[dev]['mem_size']}")
                 mem_operation = False
 
+        if not mem_operation:
+            log.error("False while allocate memory, stop simulation")
+            exit()
 
     def get_exec_time(self, name: str):
         from_layer = self.devices_graph.nodes[name]['start_layer']

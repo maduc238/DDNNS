@@ -1,6 +1,7 @@
 import networkx as nx
 
 from src.Logging import *
+from src.Enumerated import *
 
 
 def insert_layer(graph: nx.Graph, lists, group):
@@ -128,15 +129,16 @@ class Model:
     def get_trans_time(self, _from: str, _to: str, flow: str):
         sample_size = 0.0
         trans_rate = self.devices_graph[_from][_to]['trans_rate']
-        if flow == 'F':
+        if flow == FLOW_FORWARD:
             sample_size = self.neural_inter_layer_size[self.devices_graph.nodes[_from]['end_layer']]
-        elif flow == 'B':
+        elif flow == FLOW_BACKPROPAGATION:
             sample_size = self.neural_inter_layer_size[self.devices_graph.nodes[_to]['end_layer']]
         return trans_rate * sample_size
 
     def get_mem_requirement(self, name: str):
         from_layer = self.devices_graph.nodes[name]['start_layer']
         to_layer = self.devices_graph.nodes[name]['end_layer']
+        log.debug(f"From layer {from_layer} to layer {to_layer}")
         mem_rate = self.devices_graph.nodes[name]['mem_rate']
         mem_req = 0.0
         for i in range(from_layer, to_layer + 1):

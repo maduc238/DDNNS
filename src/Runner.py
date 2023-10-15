@@ -3,6 +3,7 @@ from src.Data import Data
 from src.Model import Model
 from src.Optim import Optim
 from src.Utils import *
+from src.Enumerated import *
 
 
 class Runner:
@@ -21,7 +22,7 @@ class Runner:
         data = {'id': _id,
                 'time': time,
                 'action': action,
-                'type': 'device',
+                'type': TYPE_DEVICE,
                 'name': name,
                 'data_size': data_size,
                 'flow': flow}
@@ -35,7 +36,7 @@ class Runner:
         data = {'id': _id,
                 'time': time,
                 'action': action,
-                'type': 'link',
+                'type': TYPE_LINK,
                 'from': _from,
                 'to': _to,
                 'data_size': data_size,
@@ -50,7 +51,15 @@ class Runner:
         data['time'] = time
         self.event_queue.append(data)
         self.event_queue.sort(key=timer)
-        self.time = time
+        if time > self.time:
+            self.time = time
+        log.info(f"Training: {data}")
+
+    def insert_wait(self, data, time):
+        data['time'] = time
+        self.wait_queue.append(data)
+        if time > self.time:
+            self.time = time
         log.info(f"Training: {data}")
 
     def start(self):
@@ -61,12 +70,12 @@ class Runner:
                 for (a, data_size_a) in zip(self.model.input_devices,
                                             generate_micro_batch(micro_batch_data, len(self.model.input_devices))):
                     if self.model.devices_graph.nodes[a]["handler"]:
-                        event = {'id': generate_id(), 'time': self.time, 'action': 'start', 'type': 'device',
-                                 'name': a, 'data_size': data_size_a, 'flow': 'forward'}
+                        event = {'id': generate_id(), 'time': self.time, 'action': ACTION_START, 'type': TYPE_DEVICE,
+                                 'name': a, 'data_size': data_size_a, 'flow': FLOW_FORWARD}
                         self.wait_queue.append(event)
                     else:
                         log.info(f"Insert input data size {data_size_a} on device {a} at 'time': {self.time}")
-                        self.insert_dev_event(generate_id(), self.time, 'start', a, int(data_size_a), 'forward')
+                        self.insert_dev_event(generate_id(), self.time, ACTION_START, a, int(data_size_a), FLOW_FORWARD)
                         self.model.devices_graph.nodes[a]["handler"] = True
 
             # handler event (event action means handler after this event)
@@ -78,12 +87,13 @@ class Runner:
                 for (a, data_size_a) in zip(self.model.output_device,
                                             generate_micro_batch(micro_batch_data, len(self.model.output_device))):
                     if self.model.devices_graph.nodes[a]["handler"]:
-                        event = {'id': generate_id(), 'time': self.time, 'action': 'start', 'type': 'device',
-                                 'name': a, 'data_size': data_size_a, 'flow': 'backpropagation'}
+                        event = {'id': generate_id(), 'time': self.time, 'action': ACTION_START, 'type': TYPE_DEVICE,
+                                 'name': a, 'data_size': data_size_a, 'flow': FLOW_BACKPROPAGATION}
                         self.wait_queue.append(event)
                     else:
                         log.info(f"Start backpropagation data size {data_size_a} on device {a} at 'time': {self.time}")
-                        self.insert_dev_event(generate_id(), self.time, 'start', a, int(data_size_a), 'backpropagation')
+                        self.insert_dev_event(generate_id(), self.time, ACTION_START, a, int(data_size_a),
+                                              FLOW_BACKPROPAGATION)
                         self.model.devices_graph.nodes[a]["handler"] = True
 
             while len(self.event_queue) != 0:
@@ -103,34 +113,36 @@ class Runner:
         log.info(f"Training time: {self.time} ms")
 
     def handler_event(self):
+        # log.info(self.event_queue)
+        # log.info(self.model.devices_graph.nodes(data=True))
         event = self.event_queue.pop(0)
-        if event['type'] == 'device':  # device event
+        if event['type'] == TYPE_DEVICE:  # device event
             dev = event['name']
             time = event['time']
             data_size = event['data_size']
             node_dev = self.model.devices_graph.nodes[dev]
 
             # start training event
-            if event['action'] == 'start':
+            if event['action'] == ACTION_START:
                 training_rate = node_dev['training_rate']
                 exec_time = self.model.get_exec_time(dev)
-                node_dev['handler'] = False
                 time += training_rate * exec_time * (1 + generate_normal_random())
-                self.insert_dev_event(event['id'], time, 'end', dev, int(data_size), event['flow'])
+                self.insert_dev_event(event['id'], time, ACTION_END, dev, int(data_size), event['flow'])
 
+            # end training event -> transfer
+            elif event['action'] == ACTION_END:
+                node_dev["handler"] = False
                 # handler wait process
                 for wait in self.wait_queue:
-                    if wait['type'] == 'device':
+                    if wait['type'] == TYPE_DEVICE:
                         if wait['name'] == dev:
                             self.insert_event(wait, time)
                             self.wait_queue.remove(wait)
 
-            # end training event -> transfer
-            elif event['action'] == 'end':
                 next_dev = None
-                if event['flow'] == 'forward' and dev not in self.model.output_device:
+                if event['flow'] == FLOW_FORWARD and dev not in self.model.output_device:
                     next_dev = node_dev['next_dev']
-                elif event['flow'] == 'backpropagation':
+                elif event['flow'] == FLOW_BACKPROPAGATION:
                     if dev not in self.model.input_devices:
                         next_dev = node_dev['prev_dev']
                     else:
@@ -140,50 +152,62 @@ class Runner:
                     for n_dev in next_dev:
                         # check busy link
                         if self.model.devices_graph[dev][n_dev]["handler"]:
-                            new_event = {'id': event['id'], 'time': time, 'action': 'start', 'type': 'link', 'from': dev,
-                                         'to': n_dev, 'data_size': int(data_size / len(next_dev)),
-                                         'flow': event['flow']}
-                            self.wait_queue.append(new_event)
-                            log.info(f"Training wait {new_event}")
+                            # new_event = {'id': event['id'], 'time': time, 'action': ACTION_START, 'type': TYPE_LINK,
+                            #              'from': dev, 'to': n_dev, 'data_size': int(data_size / len(next_dev)),
+                            #              'flow': event['flow']}
+                            # self.wait_queue.append(event)
+                            self.insert_wait(event, time)
+                            log.info(f"Training wait {event}")
                         # if not, continue flow
                         else:
                             self.model.devices_graph[dev][n_dev]["handler"] = True
-                            self.insert_link_event(event['id'], time, 'start', dev, n_dev,
+                            self.insert_link_event(event['id'], time, ACTION_START, dev, n_dev,
                                                    int(data_size / len(next_dev)), event['flow'])
 
         # start transfer
-        elif event['type'] == 'link':  # link event
+        elif event['type'] == TYPE_LINK:  # link event
             from_dev = event['from']
             to_dev = event['to']
             time = event['time']
             data_size = event['data_size']
 
             # link start receive data
-            if event['action'] == 'start':
+            if event['action'] == ACTION_START:
                 data_rate_time = self.model.get_trans_time(from_dev, to_dev, event['flow'])
+                # assume that root data gain 1_000 ms
                 time += (data_rate_time * (1 + generate_normal_random()) * 1_000 * data_size) / \
                         (self.data.size * self.opt.batch_size)
-                # assume that root data gain 1_000 ms
-                self.model.devices_graph[from_dev][to_dev]["handler"] = False  # unlock process
-                self.insert_link_event(event['id'], time, 'end', from_dev, to_dev, int(data_size), event['flow'])
+                # unlock process
+                # self.model.devices_graph[from_dev][to_dev]["handler"] = False       # TODO: error here
+                self.insert_link_event(event['id'], time, ACTION_END, from_dev, to_dev, int(data_size), event['flow'])
 
                 # handler wait process
                 for wait in self.wait_queue:
-                    if wait['type'] == 'link':
+                    if wait['type'] == TYPE_LINK:
                         if (wait['from'] == from_dev and wait['to'] == to_dev) or \
                                 (wait['from'] == to_dev and wait['to'] == from_dev):
                             self.insert_event(wait, time)
                             self.wait_queue.remove(wait)
 
             # link done transmission
-            elif event['action'] == 'end':
+            elif event['action'] == ACTION_END:
+                self.model.devices_graph[from_dev][to_dev]["handler"] = False
+                # handler wait process
+                for wait in self.wait_queue:
+                    if wait['type'] == TYPE_LINK:
+                        if (wait['from'] == from_dev and wait['to'] == to_dev) or \
+                                (wait['from'] == to_dev and wait['to'] == from_dev):
+                            self.insert_event(wait, time)
+                            self.wait_queue.remove(wait)
+
                 # check busy dev
                 if self.model.devices_graph.nodes[to_dev]["handler"]:
-                    new_event = {'id': event['id'], 'time': time, 'action': 'start', 'type': 'device', 'name': to_dev,
-                                 'data_size': int(data_size), 'flow': event['flow']}
-                    self.wait_queue.append(new_event)
-                    log.info(f"Training wait {new_event}")
+                    # new_event = {'id': event['id'], 'time': time, 'action': ACTION_START, 'type': TYPE_DEVICE,
+                    #              'name': to_dev, 'data_size': int(data_size), 'flow': event['flow']}
+                    # self.wait_queue.append(event)
+                    self.insert_wait(event, time)
+                    log.info(f"Training wait {event}")
                 # if not, continue flow
                 else:
                     self.model.devices_graph.nodes[to_dev]["handler"] = True
-                    self.insert_dev_event(event['id'], time, 'start', to_dev, int(data_size), event['flow'])
+                    self.insert_dev_event(event['id'], time, ACTION_START, to_dev, int(data_size), event['flow'])

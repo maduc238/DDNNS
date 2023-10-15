@@ -51,8 +51,9 @@ ch = logging.StreamHandler()
 ch.setLevel(logging.INFO)
 ch.setFormatter(TerminalFormatter())
 
+# for file logging
 fh = logging.FileHandler(LOGGING_FILE)
-fh.setLevel(logging.DEBUG)
+fh.setLevel(logging.INFO)
 fh.setFormatter(FileFormatter())
 
 log.addHandler(ch)

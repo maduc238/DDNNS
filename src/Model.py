@@ -68,6 +68,8 @@ class Model:
                 node[a]['prev_dev'] = []
                 node[a]['handler'] = False
                 node[a]['mem_usage'] = node[a]['idle_mem']
+                node[a]['last_lock'] = 0.0
+                node[a]['last_unlock'] = 0.0
 
         for a in self.input_devices:
             node[a]['start_layer'] = 0
@@ -75,6 +77,8 @@ class Model:
             node[a]['next_dev'] = []
             node[a]['handler'] = False
             node[a]['mem_usage'] = node[a]['idle_mem']
+            node[a]['last_lock'] = 0.0
+            node[a]['last_unlock'] = 0.0
 
             for b in self.devices_graph.neighbors(a):
                 if b not in node[a]['next_dev']:
@@ -86,6 +90,8 @@ class Model:
             node[a]['prev_dev'] = []
             node[a]['handler'] = False
             node[a]['mem_usage'] = node[a]['idle_mem']
+            node[a]['last_lock'] = 0.0
+            node[a]['last_unlock'] = 0.0
             for b in self.devices_graph.neighbors(a):
                 if b not in node[a]['prev_dev']:
                     node[a]['prev_dev'].append(b)
@@ -93,6 +99,8 @@ class Model:
         # set link property
         for e1, e2 in self.devices_graph.edges:
             self.devices_graph[e1][e2]['handler'] = False
+            self.devices_graph[e1][e2]['last_lock'] = 0.0
+            self.devices_graph[e1][e2]['last_unlock'] = 0.0
 
         if len(cut_group) < 2:
             return

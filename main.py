@@ -43,7 +43,7 @@ if __name__ == '__main__':
 
     data = Data(128 * 128 * 3, 50_000)
 
-    opt = Optim(batch_size=128, num_micro_batch=1)
+    opt = Optim(batch_size=128, num_micro_batch=2)
 
     run = Runner(model, data, opt)
     run.start()

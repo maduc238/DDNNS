@@ -5,6 +5,8 @@ from src.Optim import Optim
 from src.Utils import *
 from src.Enumerated import *
 
+import copy
+
 
 class Runner:
     def __init__(self, model: Model, data: Data, opt: Optim):
@@ -25,7 +27,8 @@ class Runner:
                 'type': TYPE_DEVICE,
                 'name': name,
                 'data_size': data_size,
-                'flow': flow}
+                'flow': flow,
+                'send_to': []}
         self.event_queue.append(data)
         self.event_queue.sort(key=timer)
         if time > self.time:
@@ -54,6 +57,7 @@ class Runner:
             log.info(f"Training: {data}")
 
     def insert_event(self, data):
+        # update time
         if data['type'] == TYPE_DEVICE:
             # of next link
             _from = data['name']
@@ -83,10 +87,46 @@ class Runner:
 
         self.event_queue.append(data)
         self.event_queue.sort(key=timer)
+
+        self.all_event_is_end()
+
         if data['action'] == ACTION_WAIT:
             log.debug(f"Training: {data}")
         else:
             log.info(f"Training: {data}")
+
+    def all_event_is_end(self):
+        if len(self.event_queue) <= 1:
+            return False
+        for e in self.event_queue:
+            if e['action'] != ACTION_END:
+                return False
+        for i in range(len(self.event_queue)):
+            if self.event_queue[i]['type'] == TYPE_LINK:
+                for j in range(i + 1, len(self.event_queue)):
+                    if self.event_queue[j]['type'] == TYPE_DEVICE:
+                        # check dependency
+                        if self.event_queue[i]['to'] == self.event_queue[j]['name']:
+                            # change queue position
+                            event_temp = self.event_queue[i]
+                            self.event_queue[i] = self.event_queue[j]
+                            self.event_queue[j] = event_temp
+                            return True
+            if self.event_queue[i]['type'] == TYPE_DEVICE:
+                for j in range(i + 1, len(self.event_queue)):
+                    if self.event_queue[j]['type'] == TYPE_LINK:
+                        # check dependency
+                        link = [self.event_queue[j]['from'], self.event_queue[j]['to']]
+                        for next_dev in self.event_queue[i]['send_to']:
+                            if self.event_queue[i]['name'] in link \
+                                    and self.event_queue[i]['name'] in next_dev:
+                                # change queue position
+                                event_temp = self.event_queue[i]
+                                self.event_queue[i] = self.event_queue[j]
+                                self.event_queue[j] = event_temp
+                                return True
+
+        return True
 
     def insert_wait(self, data):
         data['action'] = ACTION_WAIT
@@ -106,7 +146,7 @@ class Runner:
                                             generate_micro_batch(micro_batch_data, len(self.model.input_devices))):
                     if self.model.devices_graph.nodes[a]["handler"]:
                         event = {'id': generate_id(), 'time': self.time, 'action': ACTION_START, 'type': TYPE_DEVICE,
-                                 'name': a, 'data_size': data_size_a, 'flow': FLOW_FORWARD}
+                                 'name': a, 'data_size': data_size_a, 'flow': FLOW_FORWARD, 'send_to': []}
                         self.wait_queue.append(event)
                     else:
                         log.info(f"Insert input data size {data_size_a} on device {a} at 'time': {self.time}")
@@ -138,7 +178,7 @@ class Runner:
             while len(self.event_queue) != 0:
                 self.handler_event()
 
-            break       # for debug
+            break  # for debug
 
         # check available queue -> get error
         if len(self.event_queue) != 0:
@@ -153,6 +193,7 @@ class Runner:
 
     def handler_event(self):
         # log.info(self.event_queue)
+        # log.info(self.wait_queue)
         # log.info(self.model.devices_graph.nodes(data=True))
         event = self.event_queue.pop(0)
         if event['type'] == TYPE_DEVICE:  # device event
@@ -174,7 +215,7 @@ class Runner:
 
             # end training event -> transfer
             elif event['action'] == ACTION_END or event['action'] == ACTION_WAIT:
-                node_dev["handler"] = False         # unlock
+                node_dev["handler"] = False  # unlock
                 if node_dev["last_unlock"] < time:
                     node_dev["last_unlock"] = time
 
@@ -183,6 +224,13 @@ class Runner:
                     if wait['type'] == TYPE_DEVICE:
                         if wait['name'] == dev:
                             wait['time'] = time
+                            if wait['action'] == ACTION_START:
+                                if wait['flow'] == FLOW_FORWARD:
+                                    log.info(f"Insert input data size {wait['data_size']} on device {wait['name']} at "
+                                             f"'time': {wait['time']}")
+                                elif wait['flow'] == FLOW_BACKPROPAGATION:
+                                    log.info(f"Start backpropagation data size {wait['data_size']} on device "
+                                             f"{wait['name']} at 'time': {wait['time']}")
                             self.insert_event(wait)
                             self.wait_queue.remove(wait)
                             break
@@ -196,16 +244,18 @@ class Runner:
                         next_dev = node_dev['prev_dev']
                     else:
                         # done training
-                        # TODO: release lock and update time for A
                         self.trained_data += data_size
+                log.debug(f"Next device = {next_dev}")
 
                 if next_dev is not None:
-                    for n_dev in next_dev:
+                    if event['action'] == ACTION_END:
+                        event['send_to'] = copy.deepcopy(next_dev)
+                    need_resend = False  # avoid resend
+                    for n_dev in event['send_to']:
+                        log.debug(f"Dev {dev} send to dev {n_dev}")
                         # check busy link
                         if self.model.devices_graph[dev][n_dev]["handler"]:
-                            event['time'] = time
-                            self.insert_wait(event)
-                            log.info(f"Training insert wait {event}")
+                            need_resend = True
                         # if not, continue flow
                         else:
                             self.model.devices_graph[dev][n_dev]["handler"] = True
@@ -213,6 +263,12 @@ class Runner:
                                 self.model.devices_graph[dev][n_dev]["last_lock"] = time
                             self.insert_link_event(event['id'], time, ACTION_START, dev, n_dev,
                                                    int(data_size / len(next_dev)), event['flow'])
+                            event['send_to'].remove(n_dev)
+
+                    if need_resend:
+                        event['time'] = time
+                        self.insert_wait(event)
+                        log.info(f"Training insert wait {event}")
 
         # start transfer
         elif event['type'] == TYPE_LINK:  # link event
@@ -232,13 +288,13 @@ class Runner:
                 self.insert_link_event(event['id'], time, ACTION_END, from_dev, to_dev, int(data_size), event['flow'])
 
                 # handler wait process
-                for wait in self.wait_queue:
-                    if wait['type'] == TYPE_LINK:
-                        if (wait['from'] == from_dev and wait['to'] == to_dev) or \
-                                (wait['from'] == to_dev and wait['to'] == from_dev):
-                            wait['time'] = time
-                            self.insert_event(wait)
-                            self.wait_queue.remove(wait)
+                # for wait in self.wait_queue:
+                #     if wait['type'] == TYPE_LINK:
+                #         if (wait['from'] == from_dev and wait['to'] == to_dev) or \
+                #                 (wait['from'] == to_dev and wait['to'] == from_dev):
+                #             wait['time'] = time
+                #             self.insert_event(wait)
+                #             self.wait_queue.remove(wait)
 
             # link done transmission
             elif event['action'] == ACTION_END or event['action'] == ACTION_WAIT:
@@ -271,4 +327,3 @@ class Runner:
         if len(self.event_queue) == 0 and len(self.wait_queue) != 0:
             wait_event = self.wait_queue.pop(0)
             self.insert_event(wait_event)
-            

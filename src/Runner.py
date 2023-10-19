@@ -99,7 +99,7 @@ class Runner:
         if len(self.event_queue) <= 1:
             return False
         for e in self.event_queue:
-            if e['action'] != ACTION_END:
+            if e['action'] != ACTION_END and e['action'] != ACTION_WAIT:
                 return False
         for i in range(len(self.event_queue)):
             if self.event_queue[i]['type'] == TYPE_LINK:
@@ -119,7 +119,7 @@ class Runner:
                         link = [self.event_queue[j]['from'], self.event_queue[j]['to']]
                         for next_dev in self.event_queue[i]['send_to']:
                             if self.event_queue[i]['name'] in link \
-                                    and self.event_queue[i]['name'] in next_dev:
+                                    and next_dev in link:
                                 # change queue position
                                 event_temp = self.event_queue[i]
                                 self.event_queue[i] = self.event_queue[j]
@@ -192,9 +192,9 @@ class Runner:
         log.info(f"Training time: {self.time} ms")
 
     def handler_event(self):
-        # log.info(self.event_queue)
-        # log.info(self.wait_queue)
-        # log.info(self.model.devices_graph.nodes(data=True))
+        log.debug(self.event_queue)
+        log.debug(self.wait_queue)
+        log.debug(self.model.devices_graph.nodes(data=True))
         event = self.event_queue.pop(0)
         if event['type'] == TYPE_DEVICE:  # device event
             dev = event['name']

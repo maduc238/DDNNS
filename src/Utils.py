@@ -2,6 +2,8 @@ from numpy import random
 import os
 import hashlib
 
+# random.seed(0)
+
 
 def generate_normal_random():
     result = random.normal(scale=0.1)
@@ -13,6 +15,10 @@ def generate_normal_random():
 
 def generate_id():
     return hashlib.sha1(os.urandom(16)).hexdigest()[:10]
+
+
+def name_generate_id(name):
+    return hashlib.sha1(bytes(name, 'utf-8')).hexdigest()[:10]
 
 
 def timer(e):

@@ -38,17 +38,19 @@ if __name__ == '__main__':
     model.set_input_device(["A"])
     model.set_output_device(["C"])
     model.set_layer_group(g, [3, 5])        # cut at layers
-    log.info(list(g.nodes(data=True)))
-    log.info(list(g.edges(data=True)))
+    for n in g.nodes(data=True):
+        log.info(n)
+    for e in g.edges(data=True):
+        log.info(e)
 
     data = Data(128 * 128 * 3, 50_000)
 
-    opt = Optim(batch_size=128, num_micro_batch=4)
+    opt = Optim(batch_size=128, num_micro_batch=8)
 
     run = Runner(model, data, opt)
+    run.set_test_flow()
     run.start()
 
-    # TODO: add tree connection
     # TODO: add energy consumption
 
     stop_time = time.time()

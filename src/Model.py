@@ -2,6 +2,7 @@ import networkx as nx
 
 from src.Logging import *
 from src.Enumerated import *
+from src.Utils import *
 
 
 def insert_layer(graph: nx.Graph, lists, group):
@@ -46,6 +47,14 @@ class Model:
     def set_output_device(self, output_device):
         self.output_device = output_device
 
+    def set_dev_basic_property(self, dev):
+        node = self.devices_graph.nodes
+        node[dev]['id'] = name_generate_id(str(dev))
+        node[dev]['handler'] = False
+        node[dev]['mem_usage'] = node[dev]['idle_mem']
+        node[dev]['last_lock'] = 0.0
+        node[dev]['last_unlock'] = 0.0
+
     def set_layer_group(self, graph: nx.Graph, cut_group):
         """
 
@@ -66,19 +75,13 @@ class Model:
                 node[a]['end_layer'] = None
                 node[a]['next_dev'] = []
                 node[a]['prev_dev'] = []
-                node[a]['handler'] = False
-                node[a]['mem_usage'] = node[a]['idle_mem']
-                node[a]['last_lock'] = 0.0
-                node[a]['last_unlock'] = 0.0
+                self.set_dev_basic_property(a)
 
         for a in self.input_devices:
             node[a]['start_layer'] = 0
             node[a]['end_layer'] = cut_group[0] - 1
             node[a]['next_dev'] = []
-            node[a]['handler'] = False
-            node[a]['mem_usage'] = node[a]['idle_mem']
-            node[a]['last_lock'] = 0.0
-            node[a]['last_unlock'] = 0.0
+            self.set_dev_basic_property(a)
 
             for b in self.devices_graph.neighbors(a):
                 if b not in node[a]['next_dev']:
@@ -88,16 +91,14 @@ class Model:
             node[a]['start_layer'] = cut_group[-1]
             node[a]['end_layer'] = self.num_layer - 1
             node[a]['prev_dev'] = []
-            node[a]['handler'] = False
-            node[a]['mem_usage'] = node[a]['idle_mem']
-            node[a]['last_lock'] = 0.0
-            node[a]['last_unlock'] = 0.0
+            self.set_dev_basic_property(a)
             for b in self.devices_graph.neighbors(a):
                 if b not in node[a]['prev_dev']:
                     node[a]['prev_dev'].append(b)
 
         # set link property
         for e1, e2 in self.devices_graph.edges:
+            self.devices_graph[e1][e2]['id'] = name_generate_id(str(e1)+"/"+str(e2))
             self.devices_graph[e1][e2]['handler'] = False
             self.devices_graph[e1][e2]['last_lock'] = 0.0
             self.devices_graph[e1][e2]['last_unlock'] = 0.0

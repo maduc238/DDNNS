@@ -121,6 +121,8 @@ class Model:
                 log.error(f"Device {dev} can not operate with memory requirement {node[dev]['mem_usage'] + mem_req} - "
                           f"memory size {node[dev]['mem_size']}")
                 mem_operation = False
+            else:
+                node[dev]['mem_usage'] += mem_req
 
         if not mem_operation:
             log.error("False while allocate memory, stop simulation")

@@ -23,6 +23,8 @@ class Runner:
         self.event_queue = []
         self.wait_queue = []
 
+        self.log_event = []
+
     def set_test_flow(self):
         self.test_flow = True
 
@@ -71,6 +73,7 @@ class Runner:
             if self.test_flow:
                 _id = self.model.devices_graph.nodes[data['name']]['id']
                 self.append_runner_event(_id, time, action)
+                self.log_event.append(data)
             log.info(f"Training: {data}")
 
     def insert_link_event(self, _id: str, time: float, action: str, _from: str, _to: str, data_size: int, flow: str):
@@ -93,6 +96,7 @@ class Runner:
             if self.test_flow:
                 _id = self.model.devices_graph[data['from']][data['to']]['id']
                 self.append_runner_event(_id, time, action)
+                self.log_event.append(data)
             log.info(f"Training: {data}")
 
     def insert_event(self, data):
@@ -113,6 +117,7 @@ class Runner:
                 elif data['type'] == TYPE_LINK:
                     _id = self.model.devices_graph[data['from']][data['to']]['id']
                     self.append_runner_event(_id, data['time'], data['action'])
+                self.log_event.append(data)
             log.info(f"Training: {data}")
 
     def update_time(self):
@@ -155,11 +160,15 @@ class Runner:
                 return False
         for i in range(len(self.event_queue)):
             if self.check_other_wait(i):
-                log.debug("Test: Push event")
+                # then push this event to first priority
+                log.debug(f"Test: Push event {self.event_queue[i]}")
                 self.event_queue.insert(0, self.event_queue.pop(i))
                 return True
 
     def check_other_wait(self, i: int):
+        if self.event_queue[i]['action'] == ACTION_WAIT:
+            return False
+
         if self.event_queue[i]['type'] == TYPE_LINK:
             # for j in range(i + 1, len(self.event_queue)):
             for j in range(len(self.event_queue)):
@@ -182,6 +191,9 @@ class Runner:
                         for next_dev in self.event_queue[i]['send_to']:
                             if self.event_queue[i]['name'] in link and next_dev in link:
                                 return False
+                    if self.event_queue[j]['type'] == TYPE_DEVICE:
+                        ...
+
         return True
 
     def insert_wait(self, data):
@@ -192,6 +204,7 @@ class Runner:
             log.debug(f"Training: {data}")
         else:
             log.info(f"Training: {data}")
+            self.log_event.append(data)
 
     def start(self):
         log.info(f"Start run simulation at 'time': {self.time}")
@@ -256,8 +269,8 @@ class Runner:
         log.info(f"Training time: {self.time} ms")
 
     def handler_event(self):
-        log.debug(self.event_queue)
-        log.debug(self.wait_queue)
+        log.debug(f"Event queue = {self.event_queue}")
+        log.debug(f"Wait queue = {self.wait_queue}")
         log.debug(self.model.devices_graph.nodes(data=True))
         event = self.event_queue.pop(0)
         if event['type'] == TYPE_DEVICE:  # device event
@@ -314,21 +327,26 @@ class Runner:
                 if next_dev is not None:
                     if event['action'] == ACTION_END:
                         event['send_to'] = copy.deepcopy(next_dev)
-                    ne_dev = copy.deepcopy(event['send_to'])
-                    need_resend = False  # avoid resend
+                    ne_dev = copy.deepcopy(event['send_to'])    # This find all next device
+                    need_resend = True  # avoid resend
                     for n_dev in ne_dev:
                         log.debug(f"Dev {dev} send to dev {n_dev}")
-                        # check busy link
-                        if self.model.devices_graph[dev][n_dev]["handler"]:
-                            need_resend = True
+                        # check busy link and device
+                        if self.model.devices_graph[dev][n_dev]["handler"] or \
+                                self.model.devices_graph.nodes[n_dev]["handler"]:
+                            # next device not available
+                            ...
+
                         # if not, continue flow
                         else:
                             self.model.devices_graph[dev][n_dev]["handler"] = True
                             if self.model.devices_graph[dev][n_dev]["last_lock"] < time:
                                 self.model.devices_graph[dev][n_dev]["last_lock"] = time
                             self.insert_link_event(event['id'], time, ACTION_START, dev, n_dev,
-                                                   int(data_size / len(next_dev)), event['flow'])
+                                                   data_size, event['flow'])
                             event['send_to'].remove(n_dev)
+                            need_resend = False
+                            break
 
                     if need_resend:
                         event['time'] = time

@@ -5,12 +5,8 @@ from src.Enumerated import *
 from src.Utils import *
 
 
-def insert_layer(graph: nx.Graph, lists, group):
+def insert_layer(graph: nx.Graph, lists):
     for rank, a in enumerate(lists[1:-1]):
-        if graph.nodes[a]['start_layer'] is None or graph.nodes[a]['end_layer'] is None:
-            graph.nodes[a]['start_layer'] = group[rank]
-            graph.nodes[a]['end_layer'] = group[rank + 1] - 1
-
         if lists[rank] not in graph.nodes[a]['prev_dev']:
             graph.nodes[a]['prev_dev'].append(lists[rank])
 
@@ -19,27 +15,10 @@ def insert_layer(graph: nx.Graph, lists, group):
 
 
 class Model:
-    def __init__(self, first_layer_mem: float, first_layer_exec_time: float):  # MB - ms
-        self.neural_mem = []
-        self.neural_exec_time = []
-        self.neural_inter_layer_size = []
-
-        self.num_layer = 1
-        self.neural_mem.append(first_layer_mem)
-        self.neural_exec_time.append(first_layer_exec_time)
-
+    def __init__(self):
         self.devices_graph = None
         self.output_device = None
         self.input_devices = None
-
-    def append(self, layer_mem: float, layer_exec_time: float, inter_layer_size: int):  # MB - ms - size
-        self.neural_mem.append(layer_mem)
-        self.neural_exec_time.append(layer_exec_time)
-        self.neural_inter_layer_size.append(inter_layer_size)
-        self.num_layer += 1
-
-    def get_num_layer(self):
-        return self.num_layer
 
     def set_input_device(self, input_devices):
         self.input_devices = input_devices
@@ -51,15 +30,13 @@ class Model:
         node = self.devices_graph.nodes
         node[dev]['id'] = name_generate_id(str(dev))
         node[dev]['handler'] = False
-        node[dev]['mem_usage'] = node[dev]['idle_mem']
         node[dev]['last_lock'] = 0.0
         node[dev]['last_unlock'] = 0.0
 
-    def set_layer_group(self, graph: nx.Graph, cut_group):
+    def set_layer_group(self, graph: nx.Graph):
         """
 
         :param graph: Devices graph
-        :param cut_group: List of cut point index
         :return:
         """
         self.devices_graph = graph
@@ -71,15 +48,11 @@ class Model:
         node = self.devices_graph.nodes
         for a in self.devices_graph.nodes():
             if a not in self.input_devices and a not in self.output_device:
-                node[a]['start_layer'] = None
-                node[a]['end_layer'] = None
                 node[a]['next_dev'] = []
                 node[a]['prev_dev'] = []
                 self.set_dev_basic_property(a)
 
         for a in self.input_devices:
-            node[a]['start_layer'] = 0
-            node[a]['end_layer'] = cut_group[0] - 1
             node[a]['next_dev'] = []
             self.set_dev_basic_property(a)
 
@@ -88,8 +61,6 @@ class Model:
                     node[a]['next_dev'].append(b)
 
         for a in self.output_device:
-            node[a]['start_layer'] = cut_group[-1]
-            node[a]['end_layer'] = self.num_layer - 1
             node[a]['prev_dev'] = []
             self.set_dev_basic_property(a)
             for b in self.devices_graph.neighbors(a):
@@ -103,56 +74,17 @@ class Model:
             self.devices_graph[e1][e2]['last_lock'] = 0.0
             self.devices_graph[e1][e2]['last_unlock'] = 0.0
 
-        if len(cut_group) < 2:
-            return
-
         # other devices
         for i in self.input_devices:
             for o in self.output_device:
                 for path in nx.all_simple_paths(self.devices_graph, source=i, target=o):
-                    if len(path) == len(cut_group) + 1:
-                        insert_layer(self.devices_graph, path, cut_group)
+                    insert_layer(self.devices_graph, path)
 
-        # check all available memory
-        mem_operation = True
-        for dev in self.devices_graph.nodes():
-            mem_req = self.get_mem_requirement(dev)
-            if node[dev]['mem_usage'] + mem_req > node[dev]['mem_size']:
-                log.error(f"Device {dev} can not operate with memory requirement {node[dev]['mem_usage'] + mem_req} - "
-                          f"memory size {node[dev]['mem_size']}")
-                mem_operation = False
-            else:
-                node[dev]['mem_usage'] += mem_req
-
-        if not mem_operation:
-            log.error("False while allocate memory, stop simulation")
-            exit()
-
-    def get_exec_time(self, name: str):
-        from_layer = self.devices_graph.nodes[name]['start_layer']
-        to_layer = self.devices_graph.nodes[name]['end_layer']
-        exec_time = 0.0
-        for i in range(from_layer, to_layer + 1):
-            exec_time += self.neural_exec_time[i]
-
-        return exec_time
-
-    def get_trans_time(self, _from: str, _to: str, flow: str):
-        sample_size = 0.0
-        trans_rate = self.devices_graph[_from][_to]['trans_rate']
+    def get_exec_time(self, name: str, data_size, flow):
         if flow == FLOW_FORWARD:
-            sample_size = self.neural_inter_layer_size[self.devices_graph.nodes[_from]['end_layer']]
-        elif flow == FLOW_BACKPROPAGATION:
-            sample_size = self.neural_inter_layer_size[self.devices_graph.nodes[_to]['end_layer']]
-        return trans_rate * sample_size
+            return self.devices_graph.nodes[name]['training_rate'] * data_size * (1 + generate_normal_random())
+        else:
+            return self.devices_graph.nodes[name]['training_rate'] * data_size * 2 * (1 + generate_normal_random())
 
-    def get_mem_requirement(self, name: str):
-        from_layer = self.devices_graph.nodes[name]['start_layer']
-        to_layer = self.devices_graph.nodes[name]['end_layer']
-        log.debug(f"From layer {from_layer} to layer {to_layer}")
-        mem_rate = self.devices_graph.nodes[name]['mem_rate']
-        mem_req = 0.0
-        for i in range(from_layer, to_layer + 1):
-            mem_req += self.neural_mem[i]
-
-        return mem_req * mem_rate
+    def get_trans_time(self, _from: str, _to: str, data_size, flow):
+        return self.devices_graph[_from][_to]['trans_rate'] * data_size * (1 + generate_normal_random())

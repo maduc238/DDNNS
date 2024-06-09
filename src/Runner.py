@@ -282,9 +282,7 @@ class Runner:
             # start training event
             if event['action'] == ACTION_START:
                 node_dev["handler"] = True
-                training_rate = node_dev['training_rate']
-                exec_time = self.model.get_exec_time(dev)
-                time += (training_rate * exec_time * data_size * (1 + generate_normal_random())) / self.opt.batch_size
+                time += self.model.get_exec_time(dev, data_size, event['flow'])
                 self.insert_dev_event(event['id'], time, ACTION_END, dev, int(data_size), event['flow'])
 
                 if node_dev["last_unlock"] < time:
@@ -363,10 +361,7 @@ class Runner:
             # link start receive data
             if event['action'] == ACTION_START:
                 self.model.devices_graph[from_dev][to_dev]["handler"] = True
-                data_rate_time = self.model.get_trans_time(from_dev, to_dev, event['flow'])
-                # assume that root data gain 1_000 ms
-                time += (data_rate_time * (1 + generate_normal_random()) * 1_000 * data_size) / \
-                        (self.data.size * self.opt.batch_size)
+                time += self.model.get_trans_time(from_dev, to_dev, data_size, event['flow'])
                 # unlock process
                 # self.model.devices_graph[from_dev][to_dev]["handler"] = False
                 self.insert_link_event(event['id'], time, ACTION_END, from_dev, to_dev, int(data_size), event['flow'])

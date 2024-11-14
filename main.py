@@ -13,14 +13,13 @@ if __name__ == '__main__':
     start_time = time.time()
 
     g = nx.Graph(name="Device Connection Graph")
-    g.add_node("A", training_rate=100)
-    g.add_node("B", training_rate=200)
-    g.add_node("C", training_rate=100)
-    g.add_node("D", training_rate=200)
-    g.add_edge("A", "B", trans_rate=1)
-    g.add_edge("B", "C", trans_rate=1)
-    g.add_edge("A", "D", trans_rate=1)
-    g.add_edge("D", "C", trans_rate=1)
+    g.add_node("A", training_rate=10)
+    g.add_node("B", training_rate=10)
+    g.add_node("C", training_rate=10)
+    g.add_node("D", training_rate=10)
+    g.add_edge("A", "B", trans_rate=4)
+    g.add_edge("B", "C", trans_rate=4)
+    g.add_edge("C", "D", trans_rate=4)
     log.info(f"Set graph {g.nodes()}")
 
     model = Model()
@@ -35,13 +34,11 @@ if __name__ == '__main__':
 
     data = Data(128 * 128 * 3, 50_000)
 
-    opt = Optim(batch_size=128, num_micro_batch=128)
+    opt = Optim(batch_size=128, num_micro_batch=8)
 
     run = Runner(model, data, opt)
-    run.set_test_flow()
+    # run.set_test_flow()
     run.start()
-
-    # TODO: add energy consumption
 
     stop_time = time.time()
     log.info(f"Simulation running for {stop_time - start_time} seconds")

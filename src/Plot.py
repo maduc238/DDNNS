@@ -23,13 +23,15 @@ class Plot:
                 data[e['name']].append(e['time'])
 
         # plot
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(figsize=(8, 4))
 
         for i, name in enumerate(self.graph.nodes):
             timer = data[name]
             for j in range(len(timer) // 2):
-                ax.broken_barh([(timer[2 * j], timer[2 * j + 1] - timer[2 * j])], (5 * i, 1))
+                ax.broken_barh([(timer[2 * j], timer[2 * j + 1] - timer[2 * j])], (5 * i, 2))
 
-        ax.set_xlabel('seconds')
+        ax.set_xlabel('Thời gian (giây)')
+        ax.set_ylabel('Tên thiết bị')
         ax.set_yticks([5 * i for i in range(len(self.graph.nodes))], labels=[i for i in self.graph.nodes])
+        plt.savefig('test.pdf')
         plt.show()

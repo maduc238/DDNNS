@@ -25,8 +25,8 @@ if __name__ == '__main__':
     model = Model()
 
     model.set_input_device(["A"])
-    model.set_output_device(["C"])
-    model.set_layer_group(g,)        # cut at layers
+    model.set_output_device(["D"])
+    model.set_layer_group(g,)
     for n in g.nodes(data=True):
         log.info(n)
     for e in g.edges(data=True):
@@ -34,10 +34,10 @@ if __name__ == '__main__':
 
     data = Data(128 * 128 * 3, 50_000)
 
-    opt = Optim(batch_size=128, num_micro_batch=8)
+    opt = Optim(batch_size=128, num_micro_batch=4)
 
     run = Runner(model, data, opt)
-    # run.set_test_flow()
+    run.set_test_flow()
     run.start()
 
     stop_time = time.time()
